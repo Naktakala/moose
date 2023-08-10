@@ -985,7 +985,8 @@ class TestHarness:
             and not os.path.exists(self.options.results_file)):
             print('A previous run does not exist')
             sys.exit(1)
-
+        elif os.path.exists(self.options.results_file):
+            os.remove(self.options.results_file)
 
     ## Parse command line options and assign them to self.options
     def parseCLArgs(self, argv):
@@ -1151,10 +1152,6 @@ class TestHarness:
         # Update libmesh_dir to reflect arguments
         if opts.libmesh_dir:
             self.libmesh_dir = opts.libmesh_dir
-
-        # When running heavy tests, we'll make sure we use --no-report
-        if opts.heavy_tests:
-            self.options.report_skipped = False
 
         # User wants to write all output, so unify the options involved
         if opts.sep_files:

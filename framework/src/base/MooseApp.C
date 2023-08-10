@@ -224,7 +224,7 @@ MooseApp::validParams()
       "refinements",
       "-r <n>",
       0,
-      "Specify additional initial uniform refinements for automatic scaling");
+      "Specify additional initial uniform mesh refinements for grid convergence studies");
 
   params.addCommandLineParam<std::string>("recover",
                                           "--recover [file_base]",
@@ -798,26 +798,16 @@ MooseApp::setupOptions()
 
     auto & objmap = Registry::allObjects();
     for (auto & entry : objmap)
-    {
       for (auto & obj : entry.second)
-      {
-        std::string name = obj._name;
-        if (name.empty())
-          name = obj._alias;
-        if (name.empty())
-          name = obj._classname;
-
-        Moose::out << entry.first << "\tobject\t" << name << "\t" << obj._classname << "\t"
-                   << obj._file << "\n";
-      }
-    }
+        Moose::out << entry.first << "\tobject\t" << obj->name() << "\t" << obj->_classname << "\t"
+                   << obj->_file << "\n";
 
     auto & actmap = Registry::allActions();
     for (auto & entry : actmap)
     {
       for (auto & act : entry.second)
-        Moose::out << entry.first << "\taction\t" << act._name << "\t" << act._classname << "\t"
-                   << act._file << "\n";
+        Moose::out << entry.first << "\taction\t" << act->_name << "\t" << act->_classname << "\t"
+                   << act->_file << "\n";
     }
 
     _ready_to_exit = true;
@@ -836,41 +826,31 @@ MooseApp::setupOptions()
 
     auto & objmap = Registry::allObjects();
     for (auto & entry : objmap)
-    {
       for (auto & obj : entry.second)
       {
-        std::string name = obj._name;
-        if (name.empty())
-          name = obj._alias;
-        if (name.empty())
-          name = obj._classname;
-
         auto ent = new hit::Section("entry");
         objsec->addChild(ent);
         ent->addChild(new hit::Field("label", hit::Field::Kind::String, entry.first));
         ent->addChild(new hit::Field("type", hit::Field::Kind::String, "object"));
-        ent->addChild(new hit::Field("name", hit::Field::Kind::String, name));
-        ent->addChild(new hit::Field("class", hit::Field::Kind::String, obj._classname));
-        ent->addChild(new hit::Field("file", hit::Field::Kind::String, obj._file));
+        ent->addChild(new hit::Field("name", hit::Field::Kind::String, obj->name()));
+        ent->addChild(new hit::Field("class", hit::Field::Kind::String, obj->_classname));
+        ent->addChild(new hit::Field("file", hit::Field::Kind::String, obj->_file));
       }
-    }
 
     auto actsec = new hit::Section("actions");
     sec->addChild(actsec);
     auto & actmap = Registry::allActions();
     for (auto & entry : actmap)
-    {
       for (auto & act : entry.second)
       {
         auto ent = new hit::Section("entry");
         actsec->addChild(ent);
         ent->addChild(new hit::Field("label", hit::Field::Kind::String, entry.first));
         ent->addChild(new hit::Field("type", hit::Field::Kind::String, "action"));
-        ent->addChild(new hit::Field("task", hit::Field::Kind::String, act._name));
-        ent->addChild(new hit::Field("class", hit::Field::Kind::String, act._classname));
-        ent->addChild(new hit::Field("file", hit::Field::Kind::String, act._file));
+        ent->addChild(new hit::Field("task", hit::Field::Kind::String, act->_name));
+        ent->addChild(new hit::Field("class", hit::Field::Kind::String, act->_classname));
+        ent->addChild(new hit::Field("file", hit::Field::Kind::String, act->_file));
       }
-    }
 
     Moose::out << root.render();
 
@@ -1794,28 +1774,45 @@ MooseApp::dynamicAppRegistration(const std::string & app_name,
   params.set<RegistrationType>("reg_type") = APPLICATION;
   params.set<std::string>("registration_method") = app_name + "__registerApps";
   params.set<std::string>("library_path") = library_path;
-  params.set<std::string>("library_name") = library_name;
+
+  const auto effective_library_name =
+      library_name.empty() ? appNameToLibName(app_name) : library_name;
+  params.set<std::string>("library_name") = effective_library_name;
   params.set<bool>("library_load_dependencies") = lib_load_deps;
 
-  dynamicRegistration(params);
+  const auto paths = getLibrarySearchPaths(library_path);
+  std::ostringstream oss;
 
-  // At this point the application should be registered so check it
-  if (!AppFactory::instance().isRegistered(app_name))
+  auto successfully_loaded = false;
+  if (paths.empty())
+    oss << '"' << app_name << "\" is not a registered application name.\n"
+        << "No search paths were set. We made no attempts to locate the corresponding library "
+           "file.\n";
+  else
   {
-    std::ostringstream oss;
-    std::set<std::string> paths = getLibrarySearchPaths(library_path);
+    dynamicRegistration(params);
 
-    oss << "Unable to locate library for \"" << app_name
-        << "\".\nWe attempted to locate the library \"" << appNameToLibName(app_name)
-        << "\" in the following paths:\n\t";
-    std::copy(paths.begin(), paths.end(), infix_ostream_iterator<std::string>(oss, "\n\t"));
-    oss << "\n\nMake sure you have compiled the library and either set the \"library_path\" "
-           "variable "
-        << "in your input file or exported \"MOOSE_LIBRARY_PATH\".\n"
-        << "Compiled in debug mode to see the list of libraries checked for dynamic loading "
-           "methods.";
+    // At this point the application should be registered so check it
+    if (!AppFactory::instance().isRegistered(app_name))
+    {
+      oss << '"' << app_name << "\" is not a registered application name.\n"
+          << "Unable to locate library archive for \"" << app_name
+          << "\".\nWe attempted to locate the library archive \"" << effective_library_name
+          << "\" in the following paths:\n\t";
+      std::copy(paths.begin(), paths.end(), infix_ostream_iterator<std::string>(oss, "\n\t"));
+    }
+    else
+      successfully_loaded = true;
+  }
+
+  if (!successfully_loaded)
+  {
+    oss << "\nMake sure you have compiled the library and either set the \"library_path\" "
+           "variable in your input file or exported \"MOOSE_LIBRARY_PATH\".\n";
+
     mooseError(oss.str());
   }
+
 #else
   mooseError("Dynamic Loading is either not supported or was not detected by libMesh configure.");
 #endif
@@ -1835,7 +1832,8 @@ MooseApp::dynamicAllRegistration(const std::string & app_name,
   params.set<RegistrationType>("reg_type") = REGALL;
   params.set<std::string>("registration_method") = app_name + "__registerAll";
   params.set<std::string>("library_path") = library_path;
-  params.set<std::string>("library_name") = library_name;
+  params.set<std::string>("library_name") =
+      library_name.empty() ? appNameToLibName(app_name) : library_name;
 
   params.set<Factory *>("factory") = factory;
   params.set<Syntax *>("syntax") = syntax;
@@ -1851,24 +1849,14 @@ MooseApp::dynamicAllRegistration(const std::string & app_name,
 void
 MooseApp::dynamicRegistration(const Parameters & params)
 {
-  std::string library_name;
-  // was library name provided by the user?
-  if (params.get<std::string>("library_name").empty())
-    library_name = appNameToLibName(params.get<std::string>("app_name"));
-  else
-    library_name = params.get<std::string>("library_name");
-
-  auto paths = getLibrarySearchPaths(params.get<std::string>("library_path"));
+  const auto paths = getLibrarySearchPaths(params.get<std::string>("library_path"));
+  const auto library_name = params.get<std::string>("library_name");
 
   // Attempt to dynamically load the library
   for (const auto & path : paths)
     if (MooseUtils::checkFileReadable(path + '/' + library_name, false, false))
       loadLibraryAndDependencies(
           path + '/' + library_name, params, params.get<bool>("library_load_dependencies"));
-    else
-      mooseWarning("Unable to open library file \"",
-                   path + '/' + library_name,
-                   "\". Double check for spelling errors.");
 }
 
 void

@@ -70,6 +70,9 @@ public:
    */
   virtual void set_attributes(const std::string & name, bool inserted_only) override;
 
+  /// Prints the deprecated parameter message, assuming we have the right flags set
+  bool attemptPrintDeprecated(const std::string & name);
+
   /// This functions is called in set as a 'callback' to avoid code duplication
   template <typename T>
   void setHelper(const std::string & name);
@@ -1810,20 +1813,4 @@ InputParameters::have_parameter(std::string_view name_in) const
   const auto name = checkForRename(std::string(name_in));
 
   return Parameters::have_parameter<T>(name);
-}
-
-namespace moose
-{
-namespace internal
-{
-/**
- * Calls the valid parameter method for the object of type T.
- */
-template <typename T>
-InputParameters
-callValidParams()
-{
-  return T::validParams();
-}
-}
 }

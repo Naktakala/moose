@@ -59,8 +59,12 @@ public:
   };
 
   Parser(MooseApp & app, ActionWarehouse & action_wh);
-
   virtual ~Parser();
+
+  /**
+   * Parameters that are processed directly by the Parser and are valid anywhere in the input
+   */
+  static InputParameters validParams();
 
   /**
    * Return the primary (first) filename that was parsed
@@ -261,6 +265,9 @@ protected:
 
   /// The current stream object used for capturing errors during extraction
   std::ostringstream * _current_error_stream;
+
+  /// Tracks whether a deprecated param has had its warning message printed already.
+  std::unordered_set<std::string> _deprec_param_tracker;
 
 private:
   std::string _errmsg;

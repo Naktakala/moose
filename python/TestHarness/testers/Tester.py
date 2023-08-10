@@ -57,6 +57,7 @@ class Tester(MooseObject):
         params.addParam('vtk_version', ['ALL'], "A list of VTK versions for which this test will run on, supports normal comparison operators ('<', '>', etc...)")
         params.addParam('mesh_mode',     ['ALL'], "A list of mesh modes for which this test will run ('DISTRIBUTED', 'REPLICATED')")
         params.addParam('min_ad_size',   None, "A minimum AD size for which this test will run")
+        params.addParam('max_ad_size',   None, "A maximum AD size for which this test will run")
         params.addParam('method',        ['ALL'], "A test that runs under certain executable configurations ('ALL', 'OPT', 'DBG', 'DEVEL', 'OPROF', 'PRO')")
         params.addParam('library_mode',  ['ALL'], "A test that only runs when libraries are built under certain configurations ('ALL', 'STATIC', 'DYNAMIC')")
         params.addParam('dtk',           ['ALL'], "A test that runs only if DTK is detected ('ALL', 'TRUE', 'FALSE')")
@@ -86,7 +87,8 @@ class Tester(MooseObject):
         params.addParam('installation_type',['ALL'], "A test that runs under certain executable installation configurations ('ALL', 'IN_TREE', 'RELOCATED')")
 
         params.addParam('depend_files',  [], "A test that only runs if all depend files exist (files listed are expected to be relative to the base directory, not the test directory")
-        params.addParam('env_vars',      [], "A test that only runs if all the environment variables listed exist")
+        params.addParam('env_vars',      [], "A test that only runs if all the environment variables listed are set")
+        params.addParam('env_vars_not_set', [], "A test that only runs if all the environment variables listed are not set")
         params.addParam('should_execute', True, 'Whether or not the executable needs to be run.  Use this to chain together multiple tests based off of one executeable invocation')
         params.addParam('required_submodule', [], "A list of initialized submodules for which this test requires.")
         params.addParam('required_objects', [], "A list of required objects that are in the executable.")
@@ -518,6 +520,9 @@ class Tester(MooseObject):
         min_ad_size = self.specs['min_ad_size']
         if min_ad_size is not None and int(min_ad_size) > ad_size:
             reasons['min_ad_size'] = "Minimum AD size %d needed, but MOOSE is configured with %d" % (int(min_ad_size), ad_size)
+        max_ad_size = self.specs['max_ad_size']
+        if max_ad_size is not None and int(max_ad_size) < ad_size:
+            reasons['max_ad_size'] = "Maximum AD size %d needed, but MOOSE is configured with %d" % (int(max_ad_size), ad_size)
 
         # Check for PETSc versions
         (petsc_status, petsc_version) = util.checkPetscVersion(checks, self.specs)
@@ -635,6 +640,10 @@ class Tester(MooseObject):
             if not os.environ.get(var):
                 reasons['env_vars'] = 'ENV VAR NOT SET'
 
+        for var in self.specs['env_vars_not_set']:
+            if os.environ.get(var):
+                reasons['env_vars'] = 'ENV VAR SET'
+
         # Check for display
         if self.specs['display_required'] and not os.getenv('DISPLAY', False):
             reasons['display_required'] = 'NO DISPLAY'
@@ -656,7 +665,7 @@ class Tester(MooseObject):
         if py_packages is not None:
             missing = mooseutils.check_configuration(py_packages.split(), message=False)
             if missing:
-                reasons['python_packages_required'] = ', '.join(['no {}'.format(p) for p in missing])
+                reasons['python_packages_required'] = ', '.join(['{}'.format(p) for p in missing])
 
         # Check for programs
         programs = self.specs['requires']
@@ -694,14 +703,20 @@ class Tester(MooseObject):
                     tmp_reason.append(value)
 
             flat_reason = ', '.join(tmp_reason)
-
-            # If the test is deleted we still need to treat this differently
             self.addCaveats(flat_reason)
+
+            # Reasons we wish to silence tests
             if 'deleted' in reasons.keys():
                 if options.extra_info:
                     self.setStatus(self.deleted)
                 else:
                     self.setStatus(self.silent)
+            elif ('heavy' in reasons.keys()
+                  and options.heavy_tests
+                  and not self.specs['heavy']):
+                self.setStatus(self.silent)
+
+            # Failed already (cannot run)
             elif self.getStatus() == self.fail:
                 return False
             else:

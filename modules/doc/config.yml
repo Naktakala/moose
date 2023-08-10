@@ -45,6 +45,7 @@ Extensions:
                 Creating an Application: getting_started/new_users.md
                 Examples and Tutorials: getting_started/examples_and_tutorials/index.md
                 NCRC Applications: help/inl/applications.md
+                Virtual Test Bed: https://mooseframework.inl.gov/virtual_test_bed/
                 INL HPC Services: help/inl/index.md
                 Supplemental Resources: getting_started/supplemental_resources/index.md
                 Frequently Asked Questions: help/faq/index.md
@@ -91,7 +92,10 @@ Extensions:
             auxkernels: AuxKernels/index.md
             auxscalarkernels: AuxScalarKernels/index.md
             bcs: syntax/BCs/index.md
+            closures: syntax/Closures/index.md
+            components: syntax/Components/index.md
             constraints: syntax/Constraints/index.md
+            controllogic: syntax/ControlLogic/index.md
             controls: syntax/Controls/index.md
             dampers: syntax/Dampers/index.md
             dgkernels: syntax/DGKernels/index.md
@@ -99,6 +103,7 @@ Extensions:
             distributions: syntax/Distributions/index.md
             executioners: syntax/Executioner/index.md
             executors: syntax/Executors/index.md
+            fluidproperties: syntax/FluidProperties/index.md
             functions: syntax/Functions/index.md
             functormaterials: syntax/FunctorMaterials/index.md
             fvbcs: syntax/FVBCs/index.md
@@ -132,10 +137,12 @@ Extensions:
             restart: application_usage/restart_recover.md
             samplers: syntax/Samplers/index.md
             scalarkernels: syntax/ScalarKernels/index.md
+            solidproperties: syntax/SolidProperties/index.md
             splits: syntax/Preconditioning/index.md
             surrogates: syntax/Surrogates/index.md
             systems: syntax/Systems/index.md
             timeintegrators: syntax/Executioner/TimeIntegrator/index.md
+            times: syntax/Times/index.md
             timesteppers: syntax/Executioner/TimeStepper/index.md
             transfers: syntax/Transfers/index.md
             userobject: syntax/UserObjects/index.md

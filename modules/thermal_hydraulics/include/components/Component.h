@@ -32,7 +32,6 @@ public:
   enum EComponentSetupStatus
   {
     CREATED,                  ///< only created
-    PRE_SETUP_MESH_COMPLETED, ///< preSetupMesh() executed
     MESH_PREPARED,            ///< mesh set up
     INITIALIZED_PRIMARY,      ///< mesh set up, called primary init
     INITIALIZED_SECONDARY,    ///< mesh set up, called both inits
@@ -77,11 +76,6 @@ public:
    * Returns a list of names of components that this component depends upon
    */
   const std::vector<std::string> & getDependencies() const { return _dependencies; }
-
-  /**
-   * Wrapper function for \c preSetupMesh() that marks the function as being called
-   */
-  void executePreSetupMesh();
 
   /**
    * Wrapper function for \c init() that marks the function as being called
@@ -245,12 +239,12 @@ public:
   template <typename T>
   T getEnumParam(const std::string & param) const;
 
-protected:
   /**
-   * Performs any post-constructor, pre-mesh-setup setup
+   * Whether the problem is transient
    */
-  virtual void preSetupMesh() {}
+  bool problemIsTransient() const { return getTHMProblem().isTransient(); }
 
+protected:
   /**
    * Initializes the component
    *

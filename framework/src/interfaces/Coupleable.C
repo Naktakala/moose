@@ -134,7 +134,7 @@ Coupleable::isCoupled(const std::string & var_name_in, unsigned int i) const
       mooseError(_c_name,
                  ": The coupled variable \"",
                  var_name,
-                 "\" was never added to this objects's "
+                 "\" was never added to this object's "
                  "InputParameters, please double-check your "
                  "spelling");
 
@@ -186,7 +186,7 @@ void
 Coupleable::checkFuncType(const std::string var_name, VarType t, FuncAge age) const
 {
   if (t == VarType::Gradient && _c_nodal)
-    mooseError(_c_name, ": nodal variables do not have gradients");
+    mooseError(_c_name, ": nodal variables do not have gradients at nodes");
 
   if (age == FuncAge::Old || age == FuncAge::Older || t == VarType::GradientDot ||
       t == VarType::Dot)

@@ -468,7 +468,8 @@ SolutionUserObject::initialSetup()
   _mesh = std::make_unique<ReplicatedMesh>(_communicator);
 
   // ExodusII mesh file supplied
-  if (MooseUtils::hasExtension(_mesh_file, "e", /*strip_exodus_ext =*/true))
+  if (MooseUtils::hasExtension(_mesh_file, "e", /*strip_exodus_ext =*/true) ||
+      MooseUtils::hasExtension(_mesh_file, "exo", true))
   {
     _file_type = "exodusII";
     readExodusII();
@@ -489,7 +490,7 @@ SolutionUserObject::initialSetup()
 
   // Produce an error for an unknown file type
   else
-    mooseError("In SolutionUserObject, invalid file type (only .xda, .xdr, and .e supported)");
+    mooseError("In SolutionUserObject, invalid file type: only .xda, .xdr, .exo and .e supported");
 
   // Initialize the serial solution vector
   _serialized_solution = NumericVector<Number>::build(_communicator);
@@ -555,7 +556,7 @@ SolutionUserObject::initialSetup()
 }
 
 MooseEnum
-SolutionUserObject::getSolutionFileType()
+SolutionUserObject::getSolutionFileType() const
 {
   return _file_type;
 }
@@ -1232,9 +1233,13 @@ SolutionUserObject::readBlockIdMapFromExodusII()
 {
 #ifdef LIBMESH_HAVE_EXODUS_API
   ExodusII_IO_Helper & exio_helper = _exodusII_io->get_exio_helper();
-  std::map<int, std::string> & id_to_block = exio_helper.id_to_block_names;
+  const auto & id_to_block = exio_helper.id_to_block_names;
   _block_name_to_id.clear();
-  for (auto & it : id_to_block)
+  _block_id_to_name.clear();
+  for (const auto & it : id_to_block)
+  {
     _block_name_to_id[it.second] = it.first;
+    _block_id_to_name[it.first] = it.second;
+  }
 #endif
 }

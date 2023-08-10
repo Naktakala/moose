@@ -263,6 +263,7 @@ MooseMesh::MooseMesh(const MooseMesh & other_mesh)
     _need_ghost_ghosted_boundaries(other_mesh._need_ghost_ghosted_boundaries),
     _coord_sys(other_mesh._coord_sys),
     _rz_coord_axis(other_mesh._rz_coord_axis),
+    _subdomain_id_to_rz_coord_axis(other_mesh._subdomain_id_to_rz_coord_axis),
     _coord_system_set(other_mesh._coord_system_set),
     _provided_coord_blocks(other_mesh._provided_coord_blocks)
 {
@@ -419,6 +420,35 @@ MooseMesh::prepare(const MeshBase * const mesh_to_clone)
           "Either remove your coordinate system type information from the input file, or contact "
           "your application developer");
   }
+
+  // Set general axisymmetric axes if provided
+  if (isParamValid("rz_coord_blocks") && isParamValid("rz_coord_origins") &&
+      isParamValid("rz_coord_directions"))
+  {
+    const auto rz_coord_blocks = getParam<std::vector<SubdomainName>>("rz_coord_blocks");
+    const auto rz_coord_origins = getParam<std::vector<Point>>("rz_coord_origins");
+    const auto rz_coord_directions = getParam<std::vector<RealVectorValue>>("rz_coord_directions");
+    if (rz_coord_origins.size() == rz_coord_blocks.size() &&
+        rz_coord_directions.size() == rz_coord_blocks.size())
+    {
+      std::vector<std::pair<Point, RealVectorValue>> rz_coord_axes;
+      for (unsigned int i = 0; i < rz_coord_origins.size(); ++i)
+        rz_coord_axes.push_back(std::make_pair(rz_coord_origins[i], rz_coord_directions[i]));
+
+      setGeneralAxisymmetricCoordAxes(rz_coord_blocks, rz_coord_axes);
+
+      if (isParamSetByUser("rz_coord_axis"))
+        mooseError("The parameter 'rz_coord_axis' may not be provided if 'rz_coord_blocks', "
+                   "'rz_coord_origins', and 'rz_coord_directions' are provided.");
+    }
+    else
+      mooseError("The parameters 'rz_coord_blocks', 'rz_coord_origins', and "
+                 "'rz_coord_directions' must all have the same size.");
+  }
+  else if (isParamValid("rz_coord_blocks") || isParamValid("rz_coord_origins") ||
+           isParamValid("rz_coord_directions"))
+    mooseError("If any of the parameters 'rz_coord_blocks', 'rz_coord_origins', and "
+               "'rz_coord_directions' are provided, then all must be provided.");
 
   detectOrthogonalDimRanges();
 
@@ -586,44 +616,41 @@ MooseMesh::node(const dof_id_type i)
 const Node &
 MooseMesh::nodeRef(const dof_id_type i) const
 {
-  if (i > getMesh().max_node_id())
-    return *(*_quadrature_nodes.find(i)).second;
-
-  return getMesh().node_ref(i);
+  const auto node_ptr = queryNodePtr(i);
+  mooseAssert(node_ptr, "Missing node");
+  return *node_ptr;
 }
 
 Node &
 MooseMesh::nodeRef(const dof_id_type i)
 {
-  if (i > getMesh().max_node_id())
-    return *_quadrature_nodes[i];
-
-  return getMesh().node_ref(i);
+  return const_cast<Node &>(const_cast<const MooseMesh *>(this)->nodeRef(i));
 }
 
 const Node *
 MooseMesh::nodePtr(const dof_id_type i) const
 {
-  if (i > getMesh().max_node_id())
-    return (*_quadrature_nodes.find(i)).second;
-
-  return getMesh().node_ptr(i);
+  return &nodeRef(i);
 }
 
 Node *
 MooseMesh::nodePtr(const dof_id_type i)
 {
-  if (i > getMesh().max_node_id())
-    return _quadrature_nodes[i];
-
-  return getMesh().node_ptr(i);
+  return &nodeRef(i);
 }
 
 const Node *
 MooseMesh::queryNodePtr(const dof_id_type i) const
 {
   if (i > getMesh().max_node_id())
-    return (*_quadrature_nodes.find(i)).second;
+  {
+    auto it = _quadrature_nodes.find(i);
+    if (it == _quadrature_nodes.end())
+      return nullptr;
+    auto & node_ptr = it->second;
+    mooseAssert(node_ptr, "Uninitialized quadrature node");
+    return node_ptr;
+  }
 
   return getMesh().query_node_ptr(i);
 }
@@ -631,10 +658,7 @@ MooseMesh::queryNodePtr(const dof_id_type i) const
 Node *
 MooseMesh::queryNodePtr(const dof_id_type i)
 {
-  if (i > getMesh().max_node_id())
-    return _quadrature_nodes[i];
-
-  return getMesh().query_node_ptr(i);
+  return const_cast<Node *>(const_cast<const MooseMesh *>(this)->queryNodePtr(i));
 }
 
 void
@@ -853,6 +877,35 @@ MooseMesh::buildElemIDInfo()
   }
   comm().max(_max_ids);
   comm().min(_min_ids);
+}
+
+std::unordered_map<dof_id_type, std::set<dof_id_type>>
+MooseMesh::getElemIDMapping(const std::string & from_id_name, const std::string & to_id_name) const
+{
+  auto & mesh_base = getMesh();
+
+  if (!mesh_base.has_elem_integer(from_id_name))
+    mooseError("Mesh does not have the element integer name '", from_id_name, "'");
+  if (!mesh_base.has_elem_integer(to_id_name))
+    mooseError("Mesh does not have the element integer name '", to_id_name, "'");
+
+  const auto id1 = mesh_base.get_elem_integer_index(from_id_name);
+  const auto id2 = mesh_base.get_elem_integer_index(to_id_name);
+
+  std::unordered_map<dof_id_type, std::set<dof_id_type>> id_map;
+  for (const auto id : getAllElemIDs(id1))
+    id_map[id] = std::set<dof_id_type>();
+
+  for (const auto & elem : mesh_base.active_local_element_ptr_range())
+    id_map[elem->get_extra_integer(id1)].insert(elem->get_extra_integer(id2));
+
+  for (auto & [id, ids] : id_map)
+  {
+    libmesh_ignore(id); // avoid overzealous gcc 9.4 unused var warning
+    comm().set_union(ids);
+  }
+
+  return id_map;
 }
 
 std::set<dof_id_type>
@@ -3629,6 +3682,11 @@ MooseMesh::getUniqueCoordSystem() const
   if (!result)
     mooseError("The unique coordinate system of the mesh was requested by the mesh contains "
                "multiple blocks with different coordinate systems");
+
+  if (usingGeneralAxisymmetricCoordAxes())
+    mooseError("General axisymmetric coordinate axes are being used, and it is currently "
+               "conservatively assumed that in this case there is no unique coordinate system.");
+
   return unique_system;
 }
 
@@ -3647,6 +3705,70 @@ MooseMesh::setAxisymmetricCoordAxis(const MooseEnum & rz_coord_axis)
 }
 
 void
+MooseMesh::setGeneralAxisymmetricCoordAxes(
+    const std::vector<SubdomainName> & blocks,
+    const std::vector<std::pair<Point, RealVectorValue>> & axes)
+{
+  // Set the axes for the given blocks
+  mooseAssert(blocks.size() == axes.size(), "Blocks and axes vectors must be the same length.");
+  for (const auto i : index_range(blocks))
+  {
+    const auto subdomain_id = getSubdomainID(blocks[i]);
+    const auto it = _coord_sys.find(subdomain_id);
+    if (it == _coord_sys.end())
+      mooseError("The block '",
+                 blocks[i],
+                 "' has not set a coordinate system. Make sure to call setCoordSystem() before "
+                 "setGeneralAxisymmetricCoordAxes().");
+    else
+    {
+      if (it->second == Moose::COORD_RZ)
+      {
+        const auto direction = axes[i].second;
+        if (direction.is_zero())
+          mooseError("Only nonzero vectors may be supplied for RZ directions.");
+
+        _subdomain_id_to_rz_coord_axis[subdomain_id] =
+            std::make_pair(axes[i].first, direction.unit());
+      }
+      else
+        mooseError("The block '",
+                   blocks[i],
+                   "' was provided in setGeneralAxisymmetricCoordAxes(), but the coordinate system "
+                   "for this block is not 'RZ'.");
+    }
+  }
+
+  // Make sure there are no RZ blocks that still do not have axes
+  const auto all_subdomain_ids = meshSubdomains();
+  for (const auto subdomain_id : all_subdomain_ids)
+    if (getCoordSystem(subdomain_id) == Moose::COORD_RZ &&
+        !_subdomain_id_to_rz_coord_axis.count(subdomain_id))
+      mooseError("The block '",
+                 getSubdomainName(subdomain_id),
+                 "' was specified to use the 'RZ' coordinate system but was not given in "
+                 "setGeneralAxisymmetricCoordAxes().");
+
+  updateCoordTransform();
+}
+
+const std::pair<Point, RealVectorValue> &
+MooseMesh::getGeneralAxisymmetricCoordAxis(SubdomainID subdomain_id) const
+{
+  auto it = _subdomain_id_to_rz_coord_axis.find(subdomain_id);
+  if (it != _subdomain_id_to_rz_coord_axis.end())
+    return (*it).second;
+  else
+    mooseError("Requested subdomain ", subdomain_id, " does not exist.");
+}
+
+bool
+MooseMesh::usingGeneralAxisymmetricCoordAxes() const
+{
+  return _subdomain_id_to_rz_coord_axis.size() > 0;
+}
+
+void
 MooseMesh::updateCoordTransform()
 {
   if (!_coord_transform)
@@ -3658,6 +3780,10 @@ MooseMesh::updateCoordTransform()
 unsigned int
 MooseMesh::getAxisymmetricRadialCoord() const
 {
+  if (usingGeneralAxisymmetricCoordAxes())
+    mooseError("getAxisymmetricRadialCoord() should not be called if "
+               "setGeneralAxisymmetricCoordAxes() has been called.");
+
   if (_rz_coord_axis == 0)
     return 1; // if the rotation axis is x (0), then the radial direction is y (1)
   else
@@ -3684,6 +3810,7 @@ MooseMesh::setCoordData(const MooseMesh & other_mesh)
 {
   _coord_sys = other_mesh._coord_sys;
   _rz_coord_axis = other_mesh._rz_coord_axis;
+  _subdomain_id_to_rz_coord_axis = other_mesh._subdomain_id_to_rz_coord_axis;
 }
 
 const MooseUnits &

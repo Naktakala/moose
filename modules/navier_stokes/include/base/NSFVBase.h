@@ -26,6 +26,32 @@ public:
 
   NSFVBase(const InputParameters & parameters);
 
+  ///@{ general public interface functions
+  bool hasEnergyEquation() const { return _has_energy_equation; }
+  bool hasScalar() const { return _has_scalar_equation; }
+  unsigned int dim() const { return _dim; }
+  std::string rhieChowName() const;
+  ///@}
+
+  ///@{ public interface for variable and property names
+  const NonlinearVariableName & pressureName() const { return _pressure_name; }
+  const NonlinearVariableName & fluidTemperatureName() const { return _fluid_temperature_name; }
+  const std::string & velocityName(unsigned int dim) const;
+  const std::vector<std::string> & velocityNames() const { return _velocity_name; }
+  const std::vector<NonlinearVariableName> & passiveScalarNames() const
+  {
+    return _passive_scalar_names;
+  }
+  MooseFunctorName densityName() const { return _density_name; }
+  ///@}
+
+  ///@{ public interface for boundaries
+  bool isInletBoundary(const BoundaryName & boundary_name) const;
+  bool isOutletBoundary(const BoundaryName & boundary_name) const;
+  const std::vector<BoundaryName> & inletBoundaries() const { return _inlet_boundaries; }
+  const std::vector<BoundaryName> & outletBoundaries() const { return _outlet_boundaries; }
+  ///@}
+
 protected:
   /// Type that we use in Actions for declaring coupling between the solutions
   /// of different physics components
@@ -377,6 +403,8 @@ protected:
   /// If a two-term Taylor expansion is needed for the determination of the boundary values
   /// of the pressure
   const bool _pressure_two_term_bc_expansion;
+  /// Switch to enable the two-term extrapolation on porosity jump faces.
+  const bool _pressure_allow_expansion_on_bernoulli_faces;
   /// If a two-term Taylor expansion is needed for the determination of the boundary values
   /// of the velocity/momentum
   const bool _momentum_two_term_bc_expansion;
@@ -797,6 +825,15 @@ NSFVBase<BaseType>::validParams()
       "If a two-term Taylor expansion is needed for the determination of the boundary values"
       "of the pressure.");
   params.addParam<bool>(
+      "pressure_allow_expansion_on_bernoulli_faces",
+      false,
+      "Switch to enable the two-term extrapolation on porosity jump faces. "
+      "WARNING: Depending on the mesh, enabling this parameter may lead to "
+      "termination in parallel runs due to insufficient ghosting between "
+      "processors. An example can be the presence of multiple porosity jumps separated by only "
+      "one cell while using the Bernoulli pressure treatment. In such cases adjust the "
+      "`ghost_layers` parameter. ");
+  params.addParam<bool>(
       "momentum_two_term_bc_expansion",
       true,
       "If a two-term Taylor expansion is needed for the determination of the boundary values"
@@ -841,11 +878,22 @@ NSFVBase<BaseType>::validParams()
       "pressure_face_interpolation momentum_two_term_bc_expansion "
       "energy_two_term_bc_expansion passive_scalar_two_term_bc_expansion "
       "mixing_length_two_term_bc_expansion pressure_two_term_bc_expansion "
-      "velocity_interpolation",
+      "pressure_allow_expansion_on_bernoulli_faces velocity_interpolation",
       "Numerical scheme");
 
   params.addParamNamesToGroup("momentum_scaling energy_scaling mass_scaling passive_scalar_scaling",
                               "Scaling");
+
+  /**
+   * Parameters controlling the ghosting/parallel execution
+   */
+  params.addRangeCheckedParam<unsigned short>(
+      "ghost_layers",
+      2,
+      "ghost_layers > 0",
+      "The number of geometric/algebraic/coupling layers to ghost.");
+
+  params.addParamNamesToGroup("ghost_layers", "Parallel Execution Tuning");
 
   /**
    * Parameter controlling the turbulence handling used for the equations.
@@ -860,16 +908,12 @@ NSFVBase<BaseType>::validParams()
                                 exec_enum,
                                 "When the mixing length aux kernels should be executed.");
 
-  params.addRangeCheckedParam<Real>("von_karman_const",
-                                    0.41,
-                                    "von_karman_const > 0.0",
-                                    "Von Karman parameter for the mixing length model");
-  params.addRangeCheckedParam<Real>(
-      "von_karman_const_0", 0.09, "von_karman_const_0 > 0.0", "'Escudier' model parameter");
-  params.addRangeCheckedParam<Real>(
+  params.addParam<MooseFunctorName>(
+      "von_karman_const", 0.41, "Von Karman parameter for the mixing length model");
+  params.addParam<MooseFunctorName>("von_karman_const_0", 0.09, "'Escudier' model parameter");
+  params.addParam<MooseFunctorName>(
       "mixing_length_delta",
       1.0,
-      "mixing_length_delta > 0.0",
       "Tunable parameter related to the thickness of the boundary layer."
       "When it is not specified, Prandtl's original unbounded wall distance mixing length model is"
       "retrieved.");
@@ -1003,6 +1047,8 @@ NSFVBase<BaseType>::NSFVBase(const InputParameters & parameters)
         parameters.get<MooseEnum>("passive_scalar_face_interpolation")),
     _velocity_interpolation(parameters.get<MooseEnum>("velocity_interpolation")),
     _pressure_two_term_bc_expansion(parameters.get<bool>("pressure_two_term_bc_expansion")),
+    _pressure_allow_expansion_on_bernoulli_faces(
+        parameters.get<bool>("pressure_allow_expansion_on_bernoulli_faces")),
     _momentum_two_term_bc_expansion(parameters.get<bool>("momentum_two_term_bc_expansion")),
     _energy_two_term_bc_expansion(parameters.get<bool>("energy_two_term_bc_expansion")),
     _passive_scalar_two_term_bc_expansion(
@@ -1287,6 +1333,8 @@ NSFVBase<BaseType>::addINSVariables()
         params.template set<MooseFunctorName>("w") = _velocity_name[2];
       params.template set<MooseFunctorName>(NS::porosity) = _porosity_name;
       params.template set<MooseFunctorName>(NS::density) = _density_name;
+      params.template set<bool>("allow_two_term_expansion_on_bernoulli_faces") =
+          _pressure_allow_expansion_on_bernoulli_faces;
     }
 
     addNSNonlinearVariable(pressure_type, _pressure_name, params);
@@ -1695,11 +1743,12 @@ NSFVBase<BaseType>::addINSMomentumMixingLengthKernels()
         parameters().template get<ExecFlagEnum>("mixing_length_aux_execute_on");
   else
     ml_params.template set<ExecFlagEnum>("execute_on") = {EXEC_INITIAL, EXEC_TIMESTEP_END};
-  ml_params.template set<Real>("von_karman_const") =
-      parameters().template get<Real>("von_karman_const");
-  ml_params.template set<Real>("von_karman_const_0") =
-      parameters().template get<Real>("von_karman_const_0");
-  ml_params.template set<Real>("delta") = parameters().template get<Real>("mixing_length_delta");
+  ml_params.template set<MooseFunctorName>("von_karman_const") =
+      parameters().template get<MooseFunctorName>("von_karman_const");
+  ml_params.template set<MooseFunctorName>("von_karman_const_0") =
+      parameters().template get<MooseFunctorName>("von_karman_const_0");
+  ml_params.template set<MooseFunctorName>("delta") =
+      parameters().template get<MooseFunctorName>("mixing_length_delta");
 
   getProblem().addAuxKernel(ml_kernel_type, prefix() + "mixing_length_aux ", ml_params);
 }
@@ -2804,14 +2853,14 @@ template <class BaseType>
 InputParameters
 NSFVBase<BaseType>::getGhostParametersForRM()
 {
-  unsigned short necessary_layers = 2;
+  unsigned short necessary_layers = parameters().template get<unsigned short>("ghost_layers");
   if (_momentum_face_interpolation == "skewness-corrected" ||
       _energy_face_interpolation == "skewness-corrected" ||
       _pressure_face_interpolation == "skewness-corrected" ||
       _turbulence_handling == "mixing-length" ||
       (_porous_medium_treatment && parameters().template get<MooseEnum>(
                                        "porosity_interface_pressure_treatment") != "automatic"))
-    necessary_layers = 3;
+    necessary_layers = std::max(necessary_layers, (unsigned short)3);
 
   if (_porous_medium_treatment && parameters().isParamValid("porosity_smoothing_layers"))
     necessary_layers = std::max(
@@ -3055,6 +3104,10 @@ NSFVBase<BaseType>::checkGeneralControlErrors()
                                   "passive_scalar_coupled_source_coeff",
                                   "passive_scalar_two_term_bc_expansion",
                                   "passive_scalar_advection_interpolation"});
+
+  if (parameters().template get<MooseEnum>("porosity_interface_pressure_treatment") != "bernoulli")
+    checkDependentParameterError("porosity_interface_pressure_treatment",
+                                 {"pressure_allow_expansion_on_bernoulli_faces"});
 }
 
 template <class BaseType>
@@ -3477,4 +3530,38 @@ NSFVBase<BaseType>::checkRhieChowFunctorsDefined()
   if (_dim == 3 && !getProblem().hasFunctor("az", /*thread_id=*/0))
     paramError("add_flow_equations",
                "Rhie Chow coefficient az must be provided for advection by auxiliary velocities");
+}
+
+template <class BaseType>
+const std::string &
+NSFVBase<BaseType>::velocityName(const unsigned int dim) const
+{
+  if (dim >= _velocity_name.size())
+    mooseError("Argument dim = ", dim, " out of bounds");
+  return _velocity_name[dim];
+}
+
+template <class BaseType>
+bool
+NSFVBase<BaseType>::isInletBoundary(const BoundaryName & boundary_name) const
+{
+  return std::find(_inlet_boundaries.begin(), _inlet_boundaries.end(), boundary_name) !=
+         _inlet_boundaries.end();
+}
+
+template <class BaseType>
+bool
+NSFVBase<BaseType>::isOutletBoundary(const BoundaryName & boundary_name) const
+{
+  return std::find(_outlet_boundaries.begin(), _outlet_boundaries.end(), boundary_name) !=
+         _outlet_boundaries.end();
+}
+
+template <class BaseType>
+std::string
+NSFVBase<BaseType>::rhieChowName() const
+{
+  if (_porous_medium_treatment)
+    return prefix() + "pins_rhie_chow_interpolator";
+  return prefix() + "ins_rhie_chow_interpolator";
 }

@@ -147,6 +147,37 @@ coordTransformFactor(const P & point,
   }
 }
 
+/**
+ * Computes the distance to a general axis
+ *
+ * @param[in] point  Point for which to compute distance from axis
+ * @param[in] origin  Axis starting point
+ * @param[in] direction  Axis direction
+ */
+template <typename P, typename C>
+C
+computeDistanceToAxis(const P & point, const Point & origin, const RealVectorValue & direction)
+{
+  return (point - origin).cross(direction).norm();
+}
+
+/**
+ * Computes a coordinate transformation factor for a general axisymmetric axis
+ *
+ * @param[in] point  The libMesh \p Point in space where we are evaluating the factor
+ * @param[in] axis  The pair of values defining the general axisymmetric axis.
+ *                  Respectively, the values are the axis starting point and direction.
+ * @param[out] factor  The coordinate transformation factor
+ */
+template <typename P, typename C>
+void
+coordTransformFactorRZGeneral(const P & point,
+                              const std::pair<Point, RealVectorValue> & axis,
+                              C & factor)
+{
+  factor = 2 * M_PI * computeDistanceToAxis<P, C>(point, axis.first, axis.second);
+}
+
 inline void
 computeFaceInfoFaceCoord(FaceInfo & fi,
                          const Moose::CoordinateSystemType coord_type,
@@ -169,7 +200,7 @@ computeFaceInfoFaceCoord(FaceInfo & fi,
  * @param extra_ids extra ids
  * @return map of element id to new extra id
  **/
-std::map<dof_id_type, dof_id_type>
+std::unordered_map<dof_id_type, dof_id_type>
 getExtraIDUniqueCombinationMap(const MeshBase & mesh,
                                const std::set<SubdomainID> & block_ids,
                                std::vector<ExtraElementIDName> extra_ids);

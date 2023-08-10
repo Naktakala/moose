@@ -31,6 +31,7 @@
 #include "PerfGraphInterface.h"
 #include "Attributes.h"
 #include "MooseObjectWarehouse.h"
+#include "MaterialPropertyRegistry.h"
 
 #include "libmesh/enum_quadrature_type.h"
 #include "libmesh/equation_systems.h"
@@ -337,11 +338,6 @@ public:
    * @return The maximum number of quadrature points in use on any element in this problem.
    */
   unsigned int getMaxQps() const;
-
-  /**
-   * @return The maximum number of quadrature points in use on any element in this problem.
-   */
-  unsigned int getMaxShapeFunctions() const;
 
   /**
    * @return The maximum order for all scalar variables in this problem's systems.
@@ -1424,6 +1420,14 @@ public:
   void setRestartFile(const std::string & file_name);
 
   /**
+   * @return A reference to the material property registry
+   */
+  const MaterialPropertyRegistry & getMaterialPropertyRegistry() const
+  {
+    return _material_prop_registry;
+  }
+
+  /**
    * Return a reference to the material property storage
    * @return A const reference to the material property storage
    */
@@ -2093,6 +2097,11 @@ public:
    */
   void clearCurrentResidualVectorTags();
 
+  /**
+   * Indicate that we have p-refinement
+   */
+  void havePRefinement();
+
 protected:
   /// Create extra tagged vectors and matrices
   void createTagVectors();
@@ -2175,6 +2184,7 @@ protected:
   ///@}
 
   // material properties
+  MaterialPropertyRegistry _material_prop_registry;
   MaterialPropertyStorage & _material_props;
   MaterialPropertyStorage & _bnd_material_props;
   MaterialPropertyStorage & _neighbor_material_props;
@@ -2373,9 +2383,6 @@ protected:
 
   /// Maximum number of quadrature points used in the problem
   unsigned int _max_qps;
-
-  /// Maximum number of shape functions on any element in the problem
-  unsigned int _max_shape_funcs;
 
   /// Maximum scalar variable order
   Order _max_scalar_order;
