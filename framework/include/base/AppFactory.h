@@ -115,6 +115,11 @@ public:
     return _name_to_params_pointer;
   }
 
+  /**
+   * Returns the amount of times the AppFactory created the named App-type
+   */
+  size_t createdAppCount(const std::string & app_type) const;
+
   ///@{ Don't allow creation through copy/move construction or assignment
   AppFactory(AppFactory const &) = delete;
   Registry & operator=(AppFactory const &) = delete;
@@ -127,6 +132,8 @@ protected:
   std::map<std::string, appBuildPtr> _name_to_build_pointer;
 
   std::map<std::string, paramsPtr> _name_to_params_pointer;
+
+  std::map<std::string, size_t> _app_creation_count;
 
 private:
   // Private constructor for singleton pattern
