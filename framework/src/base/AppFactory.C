@@ -87,5 +87,13 @@ AppFactory::createShared(const std::string & app_type,
   command_line->addCommandLineOptionsFromParams(parameters);
   command_line->populateInputParams(parameters);
 
+  _app_creation_count[app_type]++;
   return _name_to_build_info[app_type]->build(parameters);
+
+}
+
+size_t
+AppFactory::createdAppCount(const std::string & app_type) const
+{
+  return _app_creation_count.at(app_type);
 }
