@@ -34,6 +34,8 @@ struct AppFactoryBuildInfoBase
   virtual MooseAppPtr build(const InputParameters & params) = 0;
   virtual InputParameters buildParameters() = 0;
   virtual ~AppFactoryBuildInfoBase() = default;
+
+  std::map<std::string, size_t> _app_creation_count;
 };
 template <typename T>
 struct AppFactoryBuildInfo : public AppFactoryBuildInfoBase
@@ -129,8 +131,6 @@ public:
 
 protected:
   AppFactoryBuildInfoMap _name_to_build_info;
-
-  std::map<std::string, size_t> _app_creation_count;
 
 private:
   // Private constructor for singleton pattern
